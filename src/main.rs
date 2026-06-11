@@ -2,6 +2,7 @@
 pub enum LexError {
     UnexpectedChar(char),
     UnexpectedEOF(String),
+    InvalidNumber(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -13,6 +14,7 @@ pub enum ParseError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
+    NumberToken(f64),
     True,
     False,
     Null,
@@ -20,6 +22,7 @@ pub enum Token {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
+    Number(f64),
     Bool(bool),
     Null,
 }
@@ -64,6 +67,37 @@ impl Lexer {
         }
         Ok(())
     }
+
+    fn read_number(&mut self) -> Result<f64, LexError> {
+        let mut s = String::new();
+        if let Some(b'-') = self.current() {
+            s.push('-');
+            self.advance();
+        }
+        loop {
+            match self.current() {
+                Some(c @ b'0'..=b'9') => {
+                    s.push(c as char);
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+        if let Some(b'.') = self.current() {
+            s.push('.');
+            self.advance();
+            loop {
+                match self.current() {
+                    Some(c @ b'0'..=b'9') => {
+                        s.push(c as char);
+                        self.advance();
+                    }
+                    _ => break,
+                }
+            }
+        }
+        s.parse::<f64>().map_err(|_| LexError::InvalidNumber(s))
+    }
 }
 
 pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
@@ -87,6 +121,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
                 lexer.read_keyword("null")?;
                 tokens.push(Token::Null);
             }
+            Some(b'-') | Some(b'0'..=b'9') => {
+                let n = lexer.read_number()?;
+                tokens.push(Token::NumberToken(n));
+            }
             Some(c) => return Err(LexError::UnexpectedChar(c as char)),
         }
     }
@@ -94,7 +132,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
 }
 
 fn main() {
-    let input = "true  false null";
+    let input = "true  false -42.5 100 null";
     println!("testing lexer: {}", input);
     match tokenize(input) {
         Ok(tokens) => println!("Tokens: {:?}", tokens),
