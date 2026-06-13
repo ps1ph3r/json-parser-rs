@@ -233,11 +233,93 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
     Ok(tokens)
 }
 
+pub struct Parser {
+    tokens: Vec<Token>,
+    pos: usize,
+}
+
+impl Parser {
+    pub fn new(tokens: Vec<Token>) -> Self {
+        Parser { tokens, pos: 0 }
+    }
+
+    fn current(&self) -> Result<&Token, ParseError> {
+        if self.pos < self.tokens.len() {
+            Ok(&self.tokens[self.pos])
+        } else {
+            Err(ParseError::UnexpectedEOF)
+        }
+    }
+
+    fn advance(&mut self) {
+        self.pos += 1;
+    }
+
+    pub fn parse_value(&mut self) -> Result<JsonValue, ParseError> {
+        match self.current()? {
+            Token::True => {
+                self.advance();
+                Ok(JsonValue::Bool(true))
+            }
+            Token::False => {
+                self.advance();
+                Ok(JsonValue::Bool(false))
+            }
+            Token::Null => {
+                self.advance();
+                Ok(JsonValue::Null)
+            }
+            Token::NumberToken(n) => {
+                let v = *n;
+                self.advance();
+                Ok(JsonValue::Number(v))
+            }
+            Token::StringToken(s) => {
+                let v = s.clone();
+                self.advance();
+                Ok(JsonValue::Str(v))
+            }
+        }
+    }
+}
+
+pub fn parse(tokens: Vec<Token>) -> Result<JsonValue, ParseError> {
+    let mut parser = Parser::new(tokens);
+    let value = parser.parse_value()?;
+
+    if parser.pos < parser.tokens.len() {
+        let trailing_token = &parser.tokens[parser.pos];
+        return Err(ParseError::UnexpectedToken(format!(
+            "Trailing tokens found after valid JSON value: {:?}",
+            trailing_token
+        )));
+    }
+
+    Ok(value)
+}
+
+fn display(value: &JsonValue) -> String {
+    match value {
+        JsonValue::Null => String::from("null"),
+        JsonValue::Bool(true) => String::from("true"),
+        JsonValue::Bool(false) => String::from("false"),
+        JsonValue::Number(n) => format!("{}", n),
+        JsonValue::Str(s) => format!("\"{}\"", s),
+    }
+}
+
 fn main() {
-    let input = r#"true false "hello\nworld" -42.5 100 null"#;
-    println!("testing lexer: {}", input);
-    match tokenize(input) {
-        Ok(tokens) => println!("Tokens: {:?}", tokens),
-        Err(e) => println!("Error: {:?}", e),
+    let tests = vec![r#"null"#, r#"true"#, r#"42.5"#, r#""hello\nworld""#];
+
+    for input in &tests {
+        println!("Input:  {}", input);
+        match tokenize(input) {
+            Ok(tokens) => match parse(tokens) {
+                Ok(value) => println!("Output: {}", display(&value)),
+                Err(e) => println!("Parser Error: {:?}", e),
+            },
+            Err(e) => println!("Lexer Error: {:?}", e),
+        }
+        println!("---");
     }
 }
