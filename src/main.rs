@@ -18,6 +18,9 @@ pub enum ParseError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
+    LeftBracket,
+    RightBracket,
+    Comma,
     StringToken(String),
     NumberToken(f64),
     True,
@@ -27,6 +30,7 @@ pub enum Token {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
+    Array(Vec<JsonValue>),
     Str(String),
     Number(f64),
     Bool(bool),
@@ -219,6 +223,18 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
                 lexer.read_keyword("null")?;
                 tokens.push(Token::Null);
             }
+            Some(b'[') => {
+                tokens.push(Token::LeftBracket);
+                lexer.advance();
+            }
+            Some(b']') => {
+                tokens.push(Token::RightBracket);
+                lexer.advance();
+            }
+            Some(b',') => {
+                tokens.push(Token::Comma);
+                lexer.advance();
+            }
             Some(b'"') => {
                 let s = lexer.read_string()?;
                 tokens.push(Token::StringToken(s));
@@ -257,6 +273,7 @@ impl Parser {
 
     pub fn parse_value(&mut self) -> Result<JsonValue, ParseError> {
         match self.current()? {
+            Token::LeftBracket => self.parse_array(),
             Token::True => {
                 self.advance();
                 Ok(JsonValue::Bool(true))
@@ -279,7 +296,37 @@ impl Parser {
                 self.advance();
                 Ok(JsonValue::Str(v))
             }
+            Token::RightBracket => Err(ParseError::UnexpectedToken("]".to_string())),
+            Token::Comma => Err(ParseError::UnexpectedToken(",".to_string())),
         }
+    }
+
+    fn parse_array(&mut self) -> Result<JsonValue, ParseError> {
+        self.advance(); // step past LeftBracket
+        let mut elements: Vec<JsonValue> = Vec::new();
+
+        if let Token::RightBracket = self.current()? {
+            self.advance();
+            return Ok(JsonValue::Array(elements));
+        }
+
+        loop {
+            let element = self.parse_value()?;
+            elements.push(element);
+
+            match self.current()? {
+                Token::Comma => {
+                    self.advance();
+                }
+                Token::RightBracket => {
+                    self.advance();
+                    break;
+                }
+                t => return Err(ParseError::UnexpectedToken(format!("{:?}", t))),
+            }
+        }
+
+        Ok(JsonValue::Array(elements))
     }
 }
 
@@ -305,19 +352,35 @@ fn display(value: &JsonValue) -> String {
         JsonValue::Bool(false) => String::from("false"),
         JsonValue::Number(n) => format!("{}", n),
         JsonValue::Str(s) => format!("\"{}\"", s),
+        JsonValue::Array(elements) => {
+            let mut result = String::from("[");
+            let mut first = true;
+            for element in elements {
+                if !first {
+                    result.push_str(", ");
+                }
+                result.push_str(&display(element));
+                first = false;
+            }
+            result.push(']');
+            result
+        }
     }
 }
 
 fn main() {
-    let tests = vec![r#"null"#, r#"true"#, r#"42.5"#, r#""hello\nworld""#];
+    let tests = vec![r#"null"#, r#"[1, 2, 3]"#, r#"[true, [null, false]]"#];
 
     for input in &tests {
         println!("Input:  {}", input);
         match tokenize(input) {
-            Ok(tokens) => match parse(tokens) {
-                Ok(value) => println!("Output: {}", display(&value)),
-                Err(e) => println!("Parser Error: {:?}", e),
-            },
+            Ok(tokens) => {
+                println!("Tokens: {:?}", tokens);
+                match parse(tokens) {
+                    Ok(value) => println!("Output: {}", display(&value)),
+                    Err(e) => println!("Parser Error: {:?}", e),
+                }
+            }
             Err(e) => println!("Lexer Error: {:?}", e),
         }
         println!("---");
