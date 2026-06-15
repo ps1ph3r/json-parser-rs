@@ -18,8 +18,11 @@ pub enum ParseError {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
+    LeftBrace,
+    RightBrace,
     LeftBracket,
     RightBracket,
+    Colon,
     Comma,
     StringToken(String),
     NumberToken(f64),
@@ -30,6 +33,7 @@ pub enum Token {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
+    Object(Vec<(String, JsonValue)>),
     Array(Vec<JsonValue>),
     Str(String),
     Number(f64),
@@ -211,6 +215,30 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
             Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r') => {
                 lexer.advance();
             }
+            Some(b'{') => {
+                tokens.push(Token::LeftBrace);
+                lexer.advance();
+            }
+            Some(b'}') => {
+                tokens.push(Token::RightBrace);
+                lexer.advance();
+            }
+            Some(b'[') => {
+                tokens.push(Token::LeftBracket);
+                lexer.advance();
+            }
+            Some(b']') => {
+                tokens.push(Token::RightBracket);
+                lexer.advance();
+            }
+            Some(b':') => {
+                tokens.push(Token::Colon);
+                lexer.advance();
+            }
+            Some(b',') => {
+                tokens.push(Token::Comma);
+                lexer.advance();
+            }
             Some(b't') => {
                 lexer.read_keyword("true")?;
                 tokens.push(Token::True);
@@ -222,18 +250,6 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
             Some(b'n') => {
                 lexer.read_keyword("null")?;
                 tokens.push(Token::Null);
-            }
-            Some(b'[') => {
-                tokens.push(Token::LeftBracket);
-                lexer.advance();
-            }
-            Some(b']') => {
-                tokens.push(Token::RightBracket);
-                lexer.advance();
-            }
-            Some(b',') => {
-                tokens.push(Token::Comma);
-                lexer.advance();
             }
             Some(b'"') => {
                 let s = lexer.read_string()?;
@@ -271,8 +287,22 @@ impl Parser {
         self.pos += 1;
     }
 
+    fn expect(&mut self, description: &str) -> Result<&Token, ParseError> {
+        if self.pos < self.tokens.len() {
+            let token = &self.tokens[self.pos];
+            self.pos += 1;
+            Ok(token)
+        } else {
+            Err(ParseError::ExpectedToken {
+                expected: description.to_string(),
+                found: "EOF".to_string(),
+            })
+        }
+    }
+
     pub fn parse_value(&mut self) -> Result<JsonValue, ParseError> {
         match self.current()? {
+            Token::LeftBrace => self.parse_object(),
             Token::LeftBracket => self.parse_array(),
             Token::True => {
                 self.advance();
@@ -296,9 +326,59 @@ impl Parser {
                 self.advance();
                 Ok(JsonValue::Str(v))
             }
+            Token::RightBrace => Err(ParseError::UnexpectedToken("}".to_string())),
             Token::RightBracket => Err(ParseError::UnexpectedToken("]".to_string())),
+            Token::Colon => Err(ParseError::UnexpectedToken(":".to_string())),
             Token::Comma => Err(ParseError::UnexpectedToken(",".to_string())),
         }
+    }
+
+    fn parse_object(&mut self) -> Result<JsonValue, ParseError> {
+        self.advance(); // step past LeftBrace
+        let mut pairs: Vec<(String, JsonValue)> = Vec::new();
+
+        if let Token::RightBrace = self.current()? {
+            self.advance();
+            return Ok(JsonValue::Object(pairs));
+        }
+
+        loop {
+            let key = match self.expect("object key")? {
+                Token::StringToken(s) => s.clone(),
+                t => {
+                    return Err(ParseError::ExpectedToken {
+                        expected: "String Key".to_string(),
+                        found: format!("{:?}", t),
+                    });
+                }
+            };
+
+            match self.expect("colon")? {
+                Token::Colon => {}
+                t => {
+                    return Err(ParseError::ExpectedToken {
+                        expected: ":".to_string(),
+                        found: format!("{:?}", t),
+                    });
+                }
+            }
+
+            let value = self.parse_value()?;
+            pairs.push((key, value));
+
+            match self.current()? {
+                Token::Comma => {
+                    self.advance();
+                }
+                Token::RightBrace => {
+                    self.advance();
+                    break;
+                }
+                t => return Err(ParseError::UnexpectedToken(format!("{:?}", t))),
+            }
+        }
+
+        Ok(JsonValue::Object(pairs))
     }
 
     fn parse_array(&mut self) -> Result<JsonValue, ParseError> {
@@ -365,11 +445,24 @@ fn display(value: &JsonValue) -> String {
             result.push(']');
             result
         }
+        JsonValue::Object(pairs) => {
+            let mut result = String::from("{");
+            let mut first = true;
+            for (key, val) in pairs {
+                if !first {
+                    result.push_str(", ");
+                }
+                result.push_str(&format!("\"{}\": {}", key, display(val)));
+                first = false;
+            }
+            result.push('}');
+            result
+        }
     }
 }
 
 fn main() {
-    let tests = vec![r#"null"#, r#"[1, 2, 3]"#, r#"[true, [null, false]]"#];
+    let tests = vec![r#"null"#, r#"[1, 2, 3]"#, r#"{"name": "alice", "age": 30}"#];
 
     for input in &tests {
         println!("Input:  {}", input);
