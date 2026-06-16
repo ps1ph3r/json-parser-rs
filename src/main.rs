@@ -1,3 +1,4 @@
+// errors
 #[derive(Debug, Clone, PartialEq)]
 pub enum LexError {
     UnexpectedChar(char),
@@ -16,6 +17,7 @@ pub enum ParseError {
     ExpectedToken { expected: String, found: String },
 }
 
+// ast / value
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     LeftBrace,
@@ -41,6 +43,7 @@ pub enum JsonValue {
     Null,
 }
 
+// lexer
 pub struct Lexer {
     input: Vec<u8>,
     pos: usize,
@@ -265,6 +268,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
     Ok(tokens)
 }
 
+// parser
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -425,6 +429,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<JsonValue, ParseError> {
     Ok(value)
 }
 
+// display
 fn display(value: &JsonValue) -> String {
     match value {
         JsonValue::Null => String::from("null"),
@@ -461,8 +466,15 @@ fn display(value: &JsonValue) -> String {
     }
 }
 
+// main
 fn main() {
-    let tests = vec![r#"null"#, r#"[1, 2, 3]"#, r#"{"name": "alice", "age": 30}"#];
+    let tests = vec![
+        r#"null"#,
+        r#"42"#,
+        r#"[1, 2, 3]"#,
+        r#"{"name": "alice", "age": 30}"#,
+        r#"{"invalid_json": }"#,
+    ];
 
     for input in &tests {
         println!("Input:  {}", input);
