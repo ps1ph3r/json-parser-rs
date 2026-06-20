@@ -491,3 +491,229 @@ fn main() {
         println!("---");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Lexer Tests
+
+    #[test]
+    fn test_tokenize_primitives() {
+        let input = "true false null";
+        let expected = vec![Token::True, Token::False, Token::Null];
+        assert_eq!(tokenize(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_tokenize_numbers() {
+        let input = "0 42 -17 3.1415 -0.001";
+        let expected = vec![
+            Token::NumberToken(0.0),
+            Token::NumberToken(42.0),
+            Token::NumberToken(-17.0),
+            Token::NumberToken(3.1415),
+            Token::NumberToken(-0.001),
+        ];
+        assert_eq!(tokenize(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_tokenize_string_escapes() {
+        let input = r#""hello\nworld" "tab\t" "quote\"" "slash\\" "unicode \u0041""#;
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0], Token::StringToken("hello\nworld".to_string()));
+        assert_eq!(tokens[1], Token::StringToken("tab\t".to_string()));
+        assert_eq!(tokens[2], Token::StringToken("quote\"".to_string()));
+        assert_eq!(tokens[3], Token::StringToken("slash\\".to_string()));
+        assert_eq!(tokens[4], Token::StringToken("unicode A".to_string()));
+    }
+
+    #[test]
+    fn test_tokenize_structural_symbols() {
+        let input = "{ } [ ] : ,";
+        let expected = vec![
+            Token::LeftBrace,
+            Token::RightBrace,
+            Token::LeftBracket,
+            Token::RightBracket,
+            Token::Colon,
+            Token::Comma,
+        ];
+        assert_eq!(tokenize(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_tokenize_lexer_errors() {
+        // Unexpected character
+        assert_eq!(tokenize("@"), Err(LexError::UnexpectedChar('@')));
+
+        // Unterminated string
+        assert_eq!(
+            tokenize(r#""unclosed string"#),
+            Err(LexError::UnterminatedString)
+        );
+
+        // Invalid escape sequence
+        assert_eq!(
+            tokenize(r#""bad escape \x""#),
+            Err(LexError::InvalidEscape("\\x".to_string()))
+        );
+
+        // Incomplete keyword EOF
+        assert_eq!(
+            tokenize("tru"),
+            Err(LexError::UnexpectedEOF(
+                "reading keyword 'true'".to_string()
+            ))
+        );
+
+        // Invalid Hex Digit in Unicode escape
+        assert_eq!(tokenize(r#""\u000G""#), Err(LexError::InvalidHexDigit('G')));
+    }
+
+    // Parser Tests
+
+    #[test]
+    fn test_parse_primitives() {
+        assert_eq!(parse(vec![Token::Null]).unwrap(), JsonValue::Null);
+        assert_eq!(parse(vec![Token::True]).unwrap(), JsonValue::Bool(true));
+        assert_eq!(parse(vec![Token::False]).unwrap(), JsonValue::Bool(false));
+        assert_eq!(
+            parse(vec![Token::NumberToken(123.45)]).unwrap(),
+            JsonValue::Number(123.45)
+        );
+        assert_eq!(
+            parse(vec![Token::StringToken("test".to_string())]).unwrap(),
+            JsonValue::Str("test".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_arrays() {
+        // Empty array
+        let tokens = vec![Token::LeftBracket, Token::RightBracket];
+        assert_eq!(parse(tokens).unwrap(), JsonValue::Array(vec![]));
+
+        // Mixed array
+        let tokens = vec![
+            Token::LeftBracket,
+            Token::NumberToken(1.0),
+            Token::Comma,
+            Token::StringToken("a".to_string()),
+            Token::Comma,
+            Token::True,
+            Token::RightBracket,
+        ];
+        let expected = JsonValue::Array(vec![
+            JsonValue::Number(1.0),
+            JsonValue::Str("a".to_string()),
+            JsonValue::Bool(true),
+        ]);
+        assert_eq!(parse(tokens).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_objects() {
+        // Empty object
+        let tokens = vec![Token::LeftBrace, Token::RightBrace];
+        assert_eq!(parse(tokens).unwrap(), JsonValue::Object(vec![]));
+
+        // Object with values
+        let tokens = vec![
+            Token::LeftBrace,
+            Token::StringToken("key".to_string()),
+            Token::Colon,
+            Token::NumberToken(42.0),
+            Token::RightBrace,
+        ];
+        let expected = JsonValue::Object(vec![("key".to_string(), JsonValue::Number(42.0))]);
+        assert_eq!(parse(tokens).unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_errors() {
+        // Trailing tokens
+        let tokens = vec![Token::NumberToken(1.0), Token::NumberToken(2.0)];
+        assert!(matches!(parse(tokens), Err(ParseError::UnexpectedToken(_))));
+
+        // Non-string object key
+        let tokens = vec![
+            Token::LeftBrace,
+            Token::NumberToken(123.0),
+            Token::Colon,
+            Token::True,
+            Token::RightBrace,
+        ];
+        assert!(matches!(
+            parse(tokens),
+            Err(ParseError::ExpectedToken { .. })
+        ));
+
+        // Missing colon before EOF
+        let tokens = vec![Token::LeftBrace, Token::StringToken("key".to_string())];
+        assert_eq!(
+            parse(tokens),
+            Err(ParseError::ExpectedToken {
+                expected: "colon".to_string(),
+                found: "EOF".to_string(),
+            })
+        );
+    }
+    // Pretty Printing Tests
+
+    #[test]
+    fn test_display() {
+        let ast = JsonValue::Object(vec![
+            ("name".to_string(), JsonValue::Str("Alice".to_string())),
+            (
+                "skills".to_string(),
+                JsonValue::Array(vec![
+                    JsonValue::Str("Rust".to_string()),
+                    JsonValue::Str("JSON".to_string()),
+                ]),
+            ),
+            ("active".to_string(), JsonValue::Bool(true)),
+        ]);
+
+        let expected = r#"{"name": "Alice", "skills": ["Rust", "JSON"], "active": true}"#;
+        assert_eq!(display(&ast), expected);
+    }
+
+    // End-to-End Pipeline Tests
+
+    #[test]
+    fn test_e2e_valid_json() {
+        let input = r#"{
+            "title": "Parser",
+            "count": 10,
+            "items": [1, false, null],
+            "nested": { "ok": true }
+        }"#;
+
+        let tokens = tokenize(input).expect("Tokenization should succeed");
+        let parsed = parse(tokens).expect("Parsing should succeed");
+
+        assert_eq!(
+            parsed,
+            JsonValue::Object(vec![
+                ("title".to_string(), JsonValue::Str("Parser".to_string())),
+                ("count".to_string(), JsonValue::Number(10.0)),
+                (
+                    "items".to_string(),
+                    JsonValue::Array(vec![
+                        JsonValue::Number(1.0),
+                        JsonValue::Bool(false),
+                        JsonValue::Null,
+                    ])
+                ),
+                (
+                    "nested".to_string(),
+                    JsonValue::Object(vec![("ok".to_string(), JsonValue::Bool(true))])
+                )
+            ])
+        );
+    }
+}
